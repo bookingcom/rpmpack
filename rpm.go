@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path"
 	"sort"
 	"strconv"
@@ -101,6 +102,7 @@ type RPM struct {
 	customTags        map[int]IndexEntry
 	customSigs        map[int]IndexEntry
 	pgpSigner         func([]byte) ([]byte, error)
+	lead              *Lead
 }
 
 // NewRPM creates and returns a new RPM struct.
@@ -134,6 +136,7 @@ func NewRPM(m RPMMetaData) (*RPM, error) {
 		files:             make(map[string]RPMFile),
 		customTags:        make(map[int]IndexEntry),
 		customSigs:        make(map[int]IndexEntry),
+		lead:              NewLead(m),
 	}
 
 	// A package must provide itself...
@@ -256,7 +259,12 @@ func (r *RPM) Write(w io.Writer) error {
 		return fmt.Errorf("failed to close gzip payload: %w", err)
 	}
 
-	if _, err := w.Write(lead(r.Name, r.FullVersion())); err != nil {
+	lead, err := r.lead.toArray(r.FullVersion())
+	if err != nil {
+		return fmt.Errorf("failed to compute lead: %w", err)
+	}
+
+	if _, err := w.Write(lead); err != nil {
 		return fmt.Errorf("failed to write lead: %w", err)
 	}
 	// Write the regular header.
@@ -556,4 +564,33 @@ func (r *RPM) writePayload(f RPMFile, links int) error {
 	}
 	r.payloadSize += uint(len(f.Body))
 	return nil
+}
+
+
+func ReadRPMFile(p string) (*RPM, error) {
+	file, err := os.Open(p)
+
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	lead, err := ReadLead(file)
+	if err != nil {
+		return nil, err
+	}
+
+	out := &RPM{}
+	out.lead = lead
+
+	signatures, err := ReadHeader(file, signatures)
+	if err != nil {
+		return nil, err
+	}
+
+	if signatures == nil {
+		return nil, fmt.Errorf("signatures header is nil")
+	}
+
+	return out, nil
 }

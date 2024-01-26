@@ -3,6 +3,7 @@ package rpmpack
 import (
 	"io"
 	"io/ioutil"
+	"os"
 	"reflect"
 	"testing"
 
@@ -181,3 +182,45 @@ func TestAllowListDirs(t *testing.T) {
 		t.Errorf("Expected dirs differs (want->got):\n%v", d)
 	}
 }
+
+func TestWriteThenReader(t *testing.T) {
+	r, err := NewRPM(RPMMetaData{})
+	if err != nil {
+		t.Fatalf("NewRPM returned error %v", err)
+	}
+	r.AddFile(RPMFile{
+		Name: "/usr/local/hello",
+		Body: []byte("content of the file"),
+		Mode: 0100644,
+	})
+
+	w, err := os.OpenFile("test.rpm", os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+
+	if err := r.Write(w); err != nil {
+		t.Fatalf("Write returned error %v", err)
+	}
+	w.Close()
+
+	rpm, err := ReadRPMFile("test.rpm")
+
+	if err != nil {
+		t.Fatalf("Failed to read rpm: %v", err)
+	}
+
+	if rpm == nil {
+		t.Fatalf("rpm is nil")
+	}
+
+	if rpm.lead == nil {
+		t.Fatalf("lead from RPM is nil")
+	}
+
+	if rpm.lead.Equals(r.lead) == false {
+		t.Error("old and new lead don't match")
+	}
+
+}
+

@@ -32,7 +32,14 @@ func TestLead(t *testing.T) {
 		"abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc",
 	}
 	for _, n := range names {
-		if got := len(lead(n, "1-2")); got != 0x60 {
+		lead := NewLead(RPMMetaData{
+			Name: n,
+		})
+		buf, err := lead.toArray("1-2")
+		if err != nil {
+			t.Errorf("Failed to convert to array for: %s %v", n, err)
+		}
+		if got := len(buf); got != 0x60 {
 			t.Errorf("len(lead(%s)) = %#x, want %#x", n, got, 0x60)
 		}
 	}

@@ -18,6 +18,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
+	"os"
 	"sort"
 )
 
@@ -52,6 +54,19 @@ func (e IndexEntry) indexBytes(tag, contentOffset int) []byte {
 		panic(err)
 	}
 	return b.Bytes()
+}
+
+func readIndex(inp io.Reader) (int32, int32, *IndexEntry, error) {
+	indexData := []int32{0, 0, 0, 0} // tag rpmtype contentOffset count
+	err := binary.Read(inp, binary.BigEndian, indexData)
+	if err != nil {
+		return 0, 0, nil, fmt.Errorf("failed to read index data: %w", err)
+	}
+	out := IndexEntry{
+		rpmtype: int(indexData[1]),
+		count: int(indexData[3]),
+	}
+	return indexData[0], indexData[2], &out, nil
 }
 
 func intEntry(rpmtype, size int, value interface{}) IndexEntry {
@@ -180,23 +195,272 @@ func (i *index) eigenHeader() IndexEntry {
 	return EntryBytes(b.Bytes())
 }
 
-func lead(name, fullVersion string) []byte {
-	// RPM format = 0xedabeedb
-	// version 3.0 = 0x0300
-	// type binary = 0x0000
-	// machine archnum (i386?) = 0x0001
-	// name ( 66 bytes, with null termination)
-	// osnum (linux?) = 0x0001
-	// sig type (header-style) = 0x0005
-	// reserved 16 bytes of 0x00
-	n := []byte(fmt.Sprintf("%s-%s", name, fullVersion))
-	if len(n) > 65 {
-		n = n[:65]
+func indexEntrySize(rpmtype int) int {
+	switch rpmtype {
+	case typeInt16:
+		return 2
+	case typeInt32:
+		return 4
+	case typeString:
+	case typeBinary:
+	case typeStringArray:
+		return 1
 	}
+	return -1
+}
+
+func readIndexEntry(entry IndexEntry, data []byte, offset int) ([]byte, error) {
+	size := indexEntrySize(entry.rpmtype)
+	if size < 1 {
+		return nil, fmt.Errorf("can't handle %d data type yet", entry.rpmtype)
+	}
+	if len(data) < offset+size {
+		return nil, fmt.Errorf("buffer is too small size: %d, offset: %d, size: %d", len(data), offset, size)
+	}
+	return data[offset:offset+size], nil
+}
+
+func readHeaderIndex(inp io.Reader, countEntries int, expectedHeaderType int, size int32) (*index, map[int]int, error) {
+	out := index {
+		entries: make(map[int]IndexEntry, countEntries),
+	}
+
+	offsets := make(map[int]int, countEntries)
+
+
+	for i := 0; i < int(countEntries); i++ {
+		tag, contentOffset, indexEntry, err := readIndex(inp)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to read index entry at %d: %w", i, err)
+		}
+		fmt.Fprintf(os.Stderr, "got tag %x offset %x type %x count %x\n", tag, contentOffset, indexEntry.rpmtype, indexEntry.count)
+		if i == 0 {
+			out.h = int(tag)
+			if out.h != expectedHeaderType {
+				return nil, nil, fmt.Errorf("missmatch type of header expected %x but got %x", expectedHeaderType, out.h)
+			}
+			if contentOffset + 0x10 != size {
+				return nil, nil, fmt.Errorf("failed to read eigen header offset not matching: %x %x", contentOffset, size)
+			}
+			continue
+		}
+		out.entries[int(tag)] = *indexEntry
+		offsets[int(tag)] = int(contentOffset)
+	}
+
+	return &out, offsets, nil
+}
+
+func ReadHeader(inp io.Reader, expectedHeaderType int) (*index, error) {
+	data, err := readExactly(inp, 8)
+	if err != nil {
+		return nil, err
+	}
+
+	if [8]byte(data) != [8]byte{0x8e, 0xad, 0xe8, 0x01, 0, 0, 0, 0} {
+		return nil, fmt.Errorf("header lead doesn't match expected: %v", data)
+	}
+
+	countEntries, err := readInt32(inp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read amount of entries: %w", err)
+	}
+
+	size, err := readInt32(inp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read length of entries: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Will be reading %d bytes\n", size)
+
+	out, offsets, err := readHeaderIndex(inp, int(countEntries), expectedHeaderType, size)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to read header index: %w", err)
+	}
+
+	body, err := readExactly(inp, int64(size))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read")
+	}
+
+	for tag := range(offsets) {
+		buf, err := readIndexEntry(out.entries[tag], body, offsets[tag])
+		if err != nil {
+			return nil, fmt.Errorf("failed to extract data for %x: %w", tag, err)
+		}
+		copy(buf[:], out.entries[tag].data)
+	}
+
+	return out, nil
+}
+
+type Lead struct {
+    magic [4]byte
+	major, minor uint8
+	typeFile uint16
+	archNum uint16
+	name string
+	osnum, signatureType uint16
+	reserved [16]uint8;
+} ;
+
+func NewLead(data RPMMetaData) *Lead {
+	out := &Lead{}
+	out.magic = [4]byte{'\xed', '\xab', '\xee', '\xdb'}
+	out.major = 0x03
+	out.minor = 0x00
+	out.typeFile = 0 // assume binary
+	out.archNum = 0  // i386? lead is ignored so it doesn't matter
+	out.name = data.Name
+	out.osnum = 0x01 // linux?
+	out.signatureType = 0x05
+	out.reserved = [16]uint8{}
+
+	return out
+}
+
+func computeName(name string, version string) []byte {
+	if name == "" {
+		return make([]byte, 66)
+	}
+
+	if version != "" {
+		name = fmt.Sprintf("%s-%s", name, version)
+	}
+
+	if len(name) > 65 {
+		return []byte(name[:65])
+	}
+
+	var n []byte = []byte(name[:])
 	n = append(n, make([]byte, 66-len(n))...)
-	b := []byte{0xed, 0xab, 0xee, 0xdb, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01}
-	b = append(b, n...)
-	b = append(b, []byte{0x00, 0x01, 0x00, 0x05}...)
-	b = append(b, make([]byte, 16)...)
-	return b
+	return n
+}
+
+func (r *Lead) toArray(fullVersion string) ([]byte, error) {
+	buf := new(bytes.Buffer)
+	buf.Write(r.magic[:])
+	buf.Write([]byte{r.major, r.minor})
+	binary.Write(buf, binary.BigEndian, r.typeFile)
+	binary.Write(buf, binary.BigEndian, r.archNum)
+	buf.Write(computeName(r.name, fullVersion))
+	binary.Write(buf, binary.BigEndian, r.osnum)
+	binary.Write(buf, binary.BigEndian, r.signatureType)
+	buf.Write(r.reserved[:])
+	out := buf.Bytes()
+	if len(out) != 96 {
+		return nil, fmt.Errorf("invalid lead length expected 96, got %d", len(out))
+	}
+	return out, nil
+}
+
+func (r *Lead) ToString() string {
+	return fmt.Sprintf(`magic: %s
+major: %d
+minor: %d
+file type: %d
+arch: %d
+name: %s
+os number: %d
+signature type: %d
+`,
+	r.magic, r.major, r.minor, r.typeFile, r.archNum, r.name, r.osnum, r.signatureType)
+}
+
+func readExactly(inp io.Reader, limit int64) ([]byte, error) {
+	return io.ReadAll(io.LimitReader(inp, limit))
+}
+
+func readUint16(inp io.Reader) (uint16, error) {
+	if val, err := readExactly(inp, 2); err != nil {
+		return 0, fmt.Errorf("failed to read uint16: %v", err)
+	} else {
+		return binary.BigEndian.Uint16(val), nil
+	}
+}
+
+func readInt32(inp io.Reader) (int32, error) {
+	if val, err := readExactly(inp, 4); err != nil {
+		return 0, fmt.Errorf("failed to read int32: %v", err)
+	} else {
+		return int32(binary.BigEndian.Uint32(val)), nil
+	}
+}
+
+func readString(inp io.Reader, length int64) (string, error) {
+	if val, err := readExactly(inp, length); err != nil {
+		return "", fmt.Errorf("failed to read string: %s", err)
+	} else {
+		return string(bytes.Trim(val, "\x00")), nil
+	}
+}
+
+func ReadLead(inp io.Reader) (*Lead, error) {
+	out := &Lead{}
+
+	if val, err := readExactly(inp, 4); err != nil {
+		return nil, fmt.Errorf("failed to read magic: %v", err)
+	} else {
+		out.magic = ([4]byte)(val)
+	}
+
+	if string(out.magic[:]) != "\xed\xab\xee\xdb" {
+		return nil, fmt.Errorf("not a valid RPM file")
+	}
+
+	version, err := io.ReadAll(io.LimitReader(inp, 2))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read version: %v", err)
+	}
+	out.major = uint8(version[0])
+	out.minor = uint8(version[1])
+	if out.major == 0 && out.minor == 0 {
+		return nil, fmt.Errorf("unsupported rpm version %d.%d", out.major, out.minor)
+	}
+
+	if out.typeFile, err = readUint16(inp); err != nil {
+		return nil, fmt.Errorf("failed to read typeFile: %v", err)
+	}
+
+	if out.archNum, err = readUint16(inp); err != nil {
+		return nil, fmt.Errorf("failed to read archNum: %v", err)
+	}
+
+	if out.name, err = readString(inp, 66); err != nil {
+		return nil, fmt.Errorf("failed to read name: %v", err)
+	}
+
+	if out.osnum, err = readUint16(inp); err != nil {
+		return nil, fmt.Errorf("failed to read osnum: %v", err)
+	}
+
+	if out.signatureType, err = readUint16(inp); err != nil {
+		return nil, fmt.Errorf("failed to read signatureType: %v", err)
+	}
+
+	var reserved []byte
+	if reserved, err = readExactly(inp, 16); err != nil {
+		return nil, fmt.Errorf("failed to read reserved: %v", err)
+	}
+	out.reserved = ([16]byte)(reserved)
+
+	for _, b := range out.reserved {
+		if b != 0 {
+			return nil, fmt.Errorf("reserved bytes not zero")
+		}
+	}
+
+	return out, nil
+}
+
+func (r *Lead) Equals(o *Lead) bool {
+	return r.magic == o.magic &&
+		r.major == o.major &&
+		r.minor == o.minor &&
+		r.typeFile == o.typeFile &&
+		r.archNum == o.archNum &&
+		r.name == o.name &&
+		r.osnum == o.osnum &&
+		r.signatureType == o.signatureType
 }
