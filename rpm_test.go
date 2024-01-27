@@ -1,6 +1,7 @@
 package rpmpack
 
 import (
+	"bytes"
 	"io"
 	"io/ioutil"
 	"os"
@@ -222,5 +223,16 @@ func TestWriteThenReader(t *testing.T) {
 		t.Error("old and new lead don't match")
 	}
 
+	if rpm.signatures.Equals(r.signatures) == false {
+		t.Error("signatures don't match")
+	}
+
+	if rpm.headers.Equals(r.headers) == false {
+		t.Error("headers don't match")
+	}
+
+	if bytes.Equal(rpm.payload.Bytes(), r.payload.Bytes()) == false {
+		t.Error("payload doesn't match")
+	}
 }
 

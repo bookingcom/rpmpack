@@ -19,7 +19,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"os"
+	"reflect"
 	"sort"
 )
 
@@ -54,6 +54,10 @@ func (e IndexEntry) indexBytes(tag, contentOffset int) []byte {
 		panic(err)
 	}
 	return b.Bytes()
+}
+
+func (e *IndexEntry) setData(data []byte) {
+	e.data = data
 }
 
 func readIndex(inp io.Reader) (int32, int32, *IndexEntry, error) {
@@ -133,6 +137,11 @@ func (i *index) sortedTags() []int {
 	return t
 }
 
+func (i *index) Equals(o *index) bool {
+	return i.h == o.h &&
+		reflect.DeepEqual(i.entries, o.entries)
+}
+
 func pad(w *bytes.Buffer, rpmtype, offset int) {
 	// We need to align integer entries...
 	if b, ok := boundaries[rpmtype]; ok && offset%b != 0 {
@@ -202,7 +211,9 @@ func indexEntrySize(rpmtype int) int {
 	case typeInt32:
 		return 4
 	case typeString:
+		return 1
 	case typeBinary:
+		return 1
 	case typeStringArray:
 		return 1
 	}
@@ -214,10 +225,36 @@ func readIndexEntry(entry IndexEntry, data []byte, offset int) ([]byte, error) {
 	if size < 1 {
 		return nil, fmt.Errorf("can't handle %d data type yet", entry.rpmtype)
 	}
-	if len(data) < offset+size {
-		return nil, fmt.Errorf("buffer is too small size: %d, offset: %d, size: %d", len(data), offset, size)
+	if len(data) < offset + (size * entry.count) {
+		return nil, fmt.Errorf("buffer is too small size: %d, offset: %d, size: %d, count: %d", len(data), offset, size, entry.count)
 	}
-	return data[offset:offset+size], nil
+	if entry.rpmtype == typeInt16 || entry.rpmtype == typeInt32 {
+		return data[offset:offset + ( size * entry.count )], nil
+	}
+	if entry.rpmtype == typeString {
+		data = 	data[offset:]
+		end := bytes.IndexByte(data, '\x00')
+		if  end > -1 {
+			return data[:end+1], nil
+		}
+		return data, nil
+	}
+	if entry.rpmtype == typeStringArray {
+		data = data[offset:]
+		out := []byte{}
+		offset = 0
+		for i := 0 ; i < entry.count ; i++ {
+			offset = bytes.IndexByte(data, '\x00')
+			out = append(out, data[:offset+1]...)
+			data = data[:offset+1]
+		}
+		return out, nil
+	}
+	if entry.rpmtype == typeBinary {
+		return nil, fmt.Errorf("not implemented binary")
+	}
+	return nil, fmt.Errorf("not implemented")
+
 }
 
 func readHeaderIndex(inp io.Reader, countEntries int, expectedHeaderType int, size int32) (*index, map[int]int, error) {
@@ -233,7 +270,7 @@ func readHeaderIndex(inp io.Reader, countEntries int, expectedHeaderType int, si
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to read index entry at %d: %w", i, err)
 		}
-		fmt.Fprintf(os.Stderr, "got tag %x offset %x type %x count %x\n", tag, contentOffset, indexEntry.rpmtype, indexEntry.count)
+
 		if i == 0 {
 			out.h = int(tag)
 			if out.h != expectedHeaderType {
@@ -244,6 +281,7 @@ func readHeaderIndex(inp io.Reader, countEntries int, expectedHeaderType int, si
 			}
 			continue
 		}
+
 		out.entries[int(tag)] = *indexEntry
 		offsets[int(tag)] = int(contentOffset)
 	}
@@ -271,8 +309,6 @@ func ReadHeader(inp io.Reader, expectedHeaderType int) (*index, error) {
 		return nil, fmt.Errorf("failed to read length of entries: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Will be reading %d bytes\n", size)
-
 	out, offsets, err := readHeaderIndex(inp, int(countEntries), expectedHeaderType, size)
 
 	if err != nil {
@@ -289,7 +325,9 @@ func ReadHeader(inp io.Reader, expectedHeaderType int) (*index, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to extract data for %x: %w", tag, err)
 		}
-		copy(buf[:], out.entries[tag].data)
+		entry := out.entries[tag]
+		entry.setData(buf)
+		out.entries[tag] = entry
 	}
 
 	return out, nil

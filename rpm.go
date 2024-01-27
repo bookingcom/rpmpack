@@ -103,6 +103,8 @@ type RPM struct {
 	customSigs        map[int]IndexEntry
 	pgpSigner         func([]byte) ([]byte, error)
 	lead              *Lead
+	signatures        *index
+	headers           *index
 }
 
 // NewRPM creates and returns a new RPM struct.
@@ -297,6 +299,7 @@ func (r *RPM) Write(w io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("failed to retrieve signatures header: %w", err)
 	}
+	r.signatures = s
 
 	if _, err := w.Write(sb); err != nil {
 		return fmt.Errorf("failed to write signature bytes: %w", err)
@@ -305,12 +308,16 @@ func (r *RPM) Write(w io.Writer) error {
 	if _, err := w.Write(make([]byte, (8-len(sb)%8)%8)); err != nil {
 		return fmt.Errorf("failed to write signature padding: %w", err)
 	}
+
 	if _, err := w.Write(hb); err != nil {
 		return fmt.Errorf("failed to write header body: %w", err)
 	}
+	r.headers = h
+
 	if _, err := w.Write(r.payload.Bytes()); err != nil {
 		return fmt.Errorf("failed to write payload: %w", err)
 	}
+
 	return nil
 
 }
@@ -590,6 +597,47 @@ func ReadRPMFile(p string) (*RPM, error) {
 
 	if signatures == nil {
 		return nil, fmt.Errorf("signatures header is nil")
+	}
+
+	out.signatures = signatures
+
+	offset, err := file.Seek(0, 1) // advance 0 from current position
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get offset from begging of file: %w", err)
+	}
+
+	if offset % 8 > 0 {
+		newOffset, err := file.Seek(offset % 8, 1) // advance padding from current position
+		if err != nil {
+			return nil, fmt.Errorf("failed to advance file by %d bytes: %w", offset % 8, err)
+		}
+		targetOffset := int64(offset / 8) * 8 + 8
+		if newOffset != targetOffset {
+			return nil, fmt.Errorf("new offset is not matching %d expected %d", newOffset, targetOffset)
+		}
+	}
+
+	headers, err := ReadHeader(file, immutable)
+	if err != nil {
+		return nil, err
+	}
+
+	if headers == nil {
+		return nil, fmt.Errorf("immutable headers is nil")
+	}
+	out.headers = headers
+
+
+	out.payload = bytes.NewBuffer(nil)
+	count, err := out.payload.ReadFrom(file)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to read payload: %w", err)
+	}
+
+	if count == 0 {
+		return nil, fmt.Errorf("read 0 bytes as payload")
 	}
 
 	return out, nil
