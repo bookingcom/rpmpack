@@ -246,12 +246,13 @@ func readIndexEntry(entry IndexEntry, data []byte, offset int) ([]byte, error) {
 		for i := 0 ; i < entry.count ; i++ {
 			offset = bytes.IndexByte(data, '\x00')
 			out = append(out, data[:offset+1]...)
-			data = data[:offset+1]
+			data = data[offset+1:]
 		}
 		return out, nil
 	}
 	if entry.rpmtype == typeBinary {
-		return nil, fmt.Errorf("not implemented binary")
+		data = data[offset:]
+		return data[:entry.count], nil
 	}
 	return nil, fmt.Errorf("not implemented")
 

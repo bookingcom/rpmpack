@@ -1,6 +1,8 @@
 module github.com/google/rpmpack
 
-go 1.21
+go 1.21.1
+
+toolchain go1.21.6
 
 require (
 	github.com/cavaliergopher/cpio v1.0.1
@@ -9,3 +11,5 @@ require (
 	github.com/klauspost/pgzip v1.2.6
 	github.com/ulikunitz/xz v0.5.11
 )
+
+require github.com/bazelbuild/rules_go v0.45.1 // indirect

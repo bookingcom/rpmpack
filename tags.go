@@ -68,6 +68,9 @@ const (
 	tagConflictFlags     = 0x041d // 1053
 	tagConflicts         = 0x041e // 1054
 	tagConflictVersion   = 0x041f // 1055
+	tagChangelogTime     = 0x0438 // 1080	int32 array	Per entry changelog Unix timestamp.
+	tagChangelogName     = 0x0439 // 1081	string array	Per entry changelog author information, typically name <email>.
+	tagChangelogText     = 0x043a // 1082	string array	Per entry changelog text.
 	tagPreinProg         = 0x043d // 1085
 	tagPostinProg        = 0x043e // 1086
 	tagPreunProg         = 0x043f // 1087

@@ -186,9 +186,23 @@ func TestAllowListDirs(t *testing.T) {
 
 func TestWriteThenReader(t *testing.T) {
 	r, err := NewRPM(RPMMetaData{})
+	r.RPMMetaData.Changelog = Changelog{
+		&ChangelogEntry{
+			Time: 05,
+			Name: "joe doe",
+			Text: "some entry",
+		},
+		&ChangelogEntry{
+			Time: 01,
+			Name: "joe doe2",
+			Text: "another entry",
+		},
+	}
+
 	if err != nil {
 		t.Fatalf("NewRPM returned error %v", err)
 	}
+
 	r.AddFile(RPMFile{
 		Name: "/usr/local/hello",
 		Body: []byte("content of the file"),
@@ -235,4 +249,3 @@ func TestWriteThenReader(t *testing.T) {
 		t.Error("payload doesn't match")
 	}
 }
-

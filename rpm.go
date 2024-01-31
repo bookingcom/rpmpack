@@ -71,6 +71,7 @@ type RPMMetaData struct {
 	Recommends,
 	Requires,
 	Conflicts Relations
+	Changelog
 }
 
 // RPM holds the state of a particular rpm file. Please use NewRPM to instantiate it.
@@ -445,6 +446,10 @@ func (r *RPM) writeGenIndexes(h *index) {
 		h.Add(tagPosttrans, EntryString(r.posttrans))
 		h.Add(tagPosttransProg, EntryString("/bin/sh"))
 	}
+
+	if r.RPMMetaData.Changelog != nil {
+		r.RPMMetaData.Changelog.AddToIndex(h)
+	}
 }
 
 // WriteFileIndexes writes file related index headers to the header
@@ -518,6 +523,10 @@ func (r *RPM) AddFile(f RPMFile) {
 		return
 	}
 	r.files[f.Name] = f
+}
+
+func (r *RPM) SetChangelog(c Changelog) {
+	r.RPMMetaData.Changelog = c
 }
 
 // writeFile writes the file to the indexes and cpio.

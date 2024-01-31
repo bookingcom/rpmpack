@@ -5,14 +5,16 @@
 load("@gazelle//:def.bzl", "gazelle")
 load("@rules_go//go:def.bzl", "go_library", "go_test")
 
-
 # gazelle:prefix github.com/google/rpmpack
 # gazelle:go_naming_convention import_alias
 gazelle(name = "gazelle")
 
+# gazelle:go_test file
+
 go_library(
     name = "rpmpack",
     srcs = [
+        "changelog.go",
         "dir.go",
         "file_types.go",
         "header.go",
@@ -33,15 +35,15 @@ go_library(
 )
 
 go_test(
-    name = "rpmpack_test",
-    srcs = [
-        "dir_test.go",
-        "file_types_test.go",
-        "header_test.go",
-        "rpm_test.go",
-        "sense_test.go",
-        "tar_test.go",
-    ],
+    name = "dir_test",
+    srcs = ["dir_test.go"],
+    embed = [":rpmpack"],
+    deps = ["@com_github_google_go_cmp//cmp"],
+)
+
+go_test(
+    name = "file_type_test",
+    srcs = ["file_types_test.go"],
     embed = [":rpmpack"],
     deps = [
         "@com_github_google_go_cmp//cmp",
@@ -52,8 +54,57 @@ go_test(
     ],
 )
 
+go_test(
+    name = "header_test",
+    srcs = ["header_test.go"],
+    embed = [":rpmpack"],
+    deps = ["@com_github_google_go_cmp//cmp"],
+)
+
+go_test(
+    name = "rpm_test",
+    srcs = ["rpm_test.go"],
+    embed = [":rpmpack"],
+    deps = [
+        "@com_github_google_go_cmp//cmp",
+        "@com_github_klauspost_compress//zstd",
+        "@com_github_klauspost_pgzip//:pgzip",
+        "@com_github_ulikunitz_xz//:xz",
+        "@com_github_ulikunitz_xz//lzma",
+    ],
+)
+
+go_test(
+    name = "sense_test",
+    srcs = ["sense_test.go"],
+    embed = [":rpmpack"],
+)
+
+go_test(
+    name = "tar_test",
+    srcs = ["tar_test.go"],
+    embed = [":rpmpack"],
+    deps = ["@com_github_google_go_cmp//cmp"],
+)
+
 alias(
     name = "go_default_library",
     actual = ":rpmpack",
     visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "file_types_test",
+    srcs = ["file_types_test.go"],
+    embed = [":rpmpack"],
+)
+
+go_test(
+    name = "rpm_read_test",
+    srcs = ["rpm_read_test.go"],
+    embed = [":rpmpack"],
+    data = [
+        "@some-centos9-rpm//file",
+    ],
+    deps = ["@rules_go//go/runfiles:go_default_library"],
 )
