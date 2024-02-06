@@ -32,6 +32,7 @@ const (
 	typeString      = 0x06
 	typeBinary      = 0x07
 	typeStringArray = 0x08
+	typei18nString  = 0x09
 )
 
 // Only integer types are aligned. This is not just an optimization - some versions
@@ -54,6 +55,14 @@ func (e IndexEntry) indexBytes(tag, contentOffset int) []byte {
 		panic(err)
 	}
 	return b.Bytes()
+}
+
+func (e IndexEntry) toString() (string, error) {
+	if e.rpmtype != typeString && e.rpmtype != typei18nString {
+		return "", fmt.Errorf("rpmtype %d is not a string type", e.rpmtype)
+	}
+
+	return string(e.data[:len(e.data)-1]), nil
 }
 
 func (e *IndexEntry) setData(data []byte) {
@@ -216,7 +225,10 @@ func indexEntrySize(rpmtype int) int {
 		return 1
 	case typeStringArray:
 		return 1
+	case typei18nString:
+		return 1
 	}
+
 	return -1
 }
 
@@ -231,7 +243,7 @@ func readIndexEntry(entry IndexEntry, data []byte, offset int) ([]byte, error) {
 	if entry.rpmtype == typeInt16 || entry.rpmtype == typeInt32 {
 		return data[offset:offset + ( size * entry.count )], nil
 	}
-	if entry.rpmtype == typeString {
+	if entry.rpmtype == typeString || entry.rpmtype == typei18nString {
 		data = 	data[offset:]
 		end := bytes.IndexByte(data, '\x00')
 		if  end > -1 {

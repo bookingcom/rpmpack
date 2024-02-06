@@ -388,6 +388,14 @@ func (r *RPM) AddCustomSig(tag int, e IndexEntry) {
 	r.customSigs[tag] = e
 }
 
+func (r *RPM) ClearSignatures(size int) {
+	r.signatures = newIndex(size)
+}
+
+func (r *RPM) SetSignature(tag int, e IndexEntry) {
+	r.signatures.Add(tag, e)
+}
+
 func (r *RPM) writeGenIndexes(h *index) {
 	h.Add(tagHeaderI18NTable, EntryString("C"))
 	h.Add(tagSize, EntryInt32([]int32{int32(r.payloadSize)}))
@@ -637,7 +645,6 @@ func ReadRPMFile(p string) (*RPM, error) {
 	}
 	out.headers = headers
 
-
 	out.payload = bytes.NewBuffer(nil)
 	count, err := out.payload.ReadFrom(file)
 
@@ -648,6 +655,54 @@ func ReadRPMFile(p string) (*RPM, error) {
 	if count == 0 {
 		return nil, fmt.Errorf("read 0 bytes as payload")
 	}
+
+	out.cpio = cpio.NewWriter(out.payload)
+
+	buff := &bytes.Buffer{}
+
+	out.Name, _ = out.headers.entries[tagName].toString()
+	out.Summary, _ = out.headers.entries[tagSummary].toString()
+	out.Description, _ = out.headers.entries[tagDescription].toString()
+	out.Version, _ = out.headers.entries[tagVersion].toString()
+	out.Release, _ = out.headers.entries[tagRelease].toString()
+	out.Arch, _ = out.headers.entries[tagArch].toString()
+	out.OS, _ = out.headers.entries[tagOS].toString()
+	out.Vendor, _ = out.headers.entries[tagVendor].toString()
+	out.URL, _ = out.headers.entries[tagURL].toString()
+	out.Packager, _ = out.headers.entries[tagPackager].toString()
+	out.Group, _ = out.headers.entries[tagGroup].toString()
+	out.Licence, _ = out.headers.entries[tagLicence].toString()
+	out.BuildHost, _ = out.headers.entries[tagBuildHost].toString()
+	out.Compressor, _ = out.headers.entries[tagPayloadCompressor].toString()
+
+
+
+
+	//Epoch     uint32
+	//BuildTime time.Time
+	// Prefixes is used for relocatable packages, usually with a one item
+	// slice, e.g. `["/opt"]`.
+	//Prefixes  []string
+	//Provides,
+	//Obsoletes,
+	//Suggests,
+	//Recommends,
+	//Requires,
+	//Conflicts Relations
+	//Changelog
+
+	z, compressorName, err := setupCompressor(out.Compressor, buff)
+	if err != nil {
+		return nil, err
+	}
+
+	if compressorName != out.Compressor {
+		return nil, fmt.Errorf("detected compressor %s does not match header %s", compressorName, out.Compressor)
+	}
+
+	//z.Write(out.cpio.)
+	out.compressedPayload = z
+
 
 	return out, nil
 }
