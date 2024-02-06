@@ -30,6 +30,22 @@ type Relation struct {
 	Sense   rpmSense
 }
 
+func SenseFromFlag(flag int32) (rpmSense, error) {
+	switch flag {
+	case int32(SenseAny):
+		return SenseAny, nil
+	case int32(SenseLess):
+		return SenseLess, nil
+	case int32(SenseGreater):
+		return SenseGreater, nil
+	case int32(SenseEqual):
+		return SenseEqual, nil
+	case int32(SenseRPMLIB):
+		return SenseRPMLIB, nil
+	}
+	return SenseAny, fmt.Errorf("invalid rpm sense flag: %d", flag)
+}
+
 // String return the string representation of the Relation
 func (r *Relation) String() string {
 	return fmt.Sprintf("%s%v%s", r.Name, r.Sense, r.Version)

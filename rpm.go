@@ -674,22 +674,17 @@ func ReadRPMFile(p string) (*RPM, error) {
 	out.Licence, _ = out.headers.entries[tagLicence].toString()
 	out.BuildHost, _ = out.headers.entries[tagBuildHost].toString()
 	out.Compressor, _ = out.headers.entries[tagPayloadCompressor].toString()
+	out.Epoch, _ = out.headers.entries[tagEpoch].toUint32()
+	out.BuildTime, _ = out.headers.entries[tagBuildTime].toTime()
+	out.Prefixes, _ = out.headers.entries[tagPrefixes].toStringArray()
 
-
-
-
-	//Epoch     uint32
-	//BuildTime time.Time
-	// Prefixes is used for relocatable packages, usually with a one item
-	// slice, e.g. `["/opt"]`.
-	//Prefixes  []string
-	//Provides,
-	//Obsoletes,
-	//Suggests,
-	//Recommends,
-	//Requires,
-	//Conflicts Relations
-	//Changelog
+	out.Provides, _ = out.headers.toRelations(tagProvides, tagProvideVersion, tagProvideFlags)
+	out.Obsoletes, _ = out.headers.toRelations(tagObsoletes, tagObsoleteVersion, tagObsoleteFlags)
+	out.Suggests, _ = out.headers.toRelations(tagSuggests, tagSuggestVersion, tagSuggestFlags)
+	out.Recommends, _ = out.headers.toRelations(tagRecommends, tagRecommendVersion, tagRecommendFlags)
+	out.Requires, _ = out.headers.toRelations(tagRequires, tagRequireVersion, tagRequireFlags)
+	out.Conflicts, _ = out.headers.toRelations(tagConflicts, tagConflictVersion, tagConflictFlags)
+	// out.Changelog, _ = out.headers.entries[tagChangelog].toChangelog()
 
 	z, compressorName, err := setupCompressor(out.Compressor, buff)
 	if err != nil {

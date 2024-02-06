@@ -21,6 +21,7 @@ import (
 	"io"
 	"reflect"
 	"sort"
+	"time"
 )
 
 const (
@@ -64,6 +65,121 @@ func (e IndexEntry) toString() (string, error) {
 
 	return string(e.data[:len(e.data)-1]), nil
 }
+
+func (e IndexEntry) toUint16() (uint16, error) {
+	if e.rpmtype != typeInt16 {
+		return 0, fmt.Errorf("rpmtype %d is not a uint16 type", e.rpmtype)
+	}
+
+	b := &bytes.Buffer{}
+	b.Write(e.data)
+	value := uint16(0)
+	binary.Read(b, binary.BigEndian, &value)
+
+	return value, nil
+}
+
+func (e IndexEntry) toUint32() (uint32, error) {
+	if e.rpmtype != typeInt32 {
+		return 0, fmt.Errorf("rpmtype %d is not a uint32 type", e.rpmtype)
+	}
+
+	b := &bytes.Buffer{}
+	b.Write(e.data)
+	value := uint32(0)
+	binary.Read(b, binary.BigEndian, &value)
+
+	return value, nil
+}
+
+func (e *index) toRelations(nameTag int, versionTag int, flagsTag int) (Relations, error) {
+	names, ok := e.entries[nameTag]
+	if !ok {
+		return nil, fmt.Errorf("failed to find name tag %d", nameTag)
+	}
+
+	versions, ok := e.entries[versionTag]
+	if !ok {
+		return nil, fmt.Errorf("failed to find versions tag %d", versionTag)
+	}
+
+	flags, ok := e.entries[flagsTag]
+	if !ok {
+		return nil, fmt.Errorf("failed to find flags tag %d", flagsTag)
+	}
+
+	if names.count != versions.count || names.count != flags.count {
+		return nil, fmt.Errorf("missmatch in counts %d %d %d", names.count, versions.count, flags.count)
+	}
+
+	if names.rpmtype != typeStringArray || versions.rpmtype != typeStringArray || flags.rpmtype != typeInt32 {
+		return nil, fmt.Errorf("name, version, flags entries are not of expected types %d %d %d", names.rpmtype, versions.rpmtype, flags.rpmtype)
+	}
+
+	actualNames, _ := names.toStringArray()
+	actualVersions, _ := versions.toStringArray()
+	actualFlags, _ := flags.toInt32Array()
+
+	out := make(Relations, len(actualNames))
+	for i := range actualNames {
+		sense, err := SenseFromFlag(actualFlags[i])
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse sense at %d: %w", i, err)
+		}
+		out[i] = &Relation{
+			Name: actualNames[i],
+			Version: actualVersions[i],
+			Sense: sense,
+		}
+	}
+
+	return out, nil
+
+}
+
+func (e IndexEntry) toTime() (time.Time, error) {
+	val, err := e.toUint32()
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	return time.Unix(int64(val), 0), nil
+}
+
+func (e IndexEntry) toStringArray() ([]string, error) {
+	if e.rpmtype != typeStringArray {
+		return nil, fmt.Errorf("rpmtype %d is not a string array type", e.rpmtype)
+	}
+
+	data := e.data
+
+	out := make([]string, e.count)
+	for i := 0; i < e.count; i++ {
+		end := bytes.IndexByte(data, '\x00')
+		if  end > -1 {
+			out[i] = string(data[:end])
+			data = data[end+1:]
+		} else {
+			out[i] = string(data)
+			data = nil
+		}
+	}
+
+	return out, nil
+}
+
+func (e IndexEntry) toInt32Array() ([]int32, error) {
+	if e.rpmtype != typeInt32 {
+		return nil, fmt.Errorf("rpmtype %d is not an int type", e.rpmtype)
+	}
+	out := make([]int32, e.count)
+	b := &bytes.Buffer{}
+	b.Write(e.data)
+	binary.Read(b, binary.BigEndian, &out)
+
+	return out, nil
+}
+
 
 func (e *IndexEntry) setData(data []byte) {
 	e.data = data
