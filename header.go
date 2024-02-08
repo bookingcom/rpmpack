@@ -66,6 +66,8 @@ func (e IndexEntry) toString() (string, error) {
 	return string(e.data[:len(e.data)-1]), nil
 }
 
+var IndexEntryToString = IndexEntry.toString
+
 func (e IndexEntry) toUint16() (uint16, error) {
 	if e.rpmtype != typeInt16 {
 		return 0, fmt.Errorf("rpmtype %d is not a uint16 type", e.rpmtype)
@@ -93,48 +95,48 @@ func (e IndexEntry) toUint32() (uint32, error) {
 }
 
 func (e *index) toRelations(nameTag int, versionTag int, flagsTag int) (Relations, error) {
-	names, ok := e.entries[nameTag]
-	if !ok {
-		return nil, fmt.Errorf("failed to find name tag %d", nameTag)
+	names, err := popTag(e.entries, nameTag, IndexEntry.toStringArray)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find name tag %d %w", nameTag, err)
 	}
 
-	versions, ok := e.entries[versionTag]
-	if !ok {
-		return nil, fmt.Errorf("failed to find versions tag %d", versionTag)
+	versions, err := popTag(e.entries, versionTag, IndexEntry.toStringArray)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find versions tag %d %w", versionTag, err)
 	}
 
-	flags, ok := e.entries[flagsTag]
-	if !ok {
-		return nil, fmt.Errorf("failed to find flags tag %d", flagsTag)
+	flags, err := popTag(e.entries, flagsTag, IndexEntry.toInt32Array)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find flags tag %d %w", flagsTag, err)
 	}
 
-	if names.count != versions.count || names.count != flags.count {
-		return nil, fmt.Errorf("missmatch in counts %d %d %d", names.count, versions.count, flags.count)
+	if (names == nil && versions == nil && flags == nil) {
+		return nil, nil
 	}
 
-	if names.rpmtype != typeStringArray || versions.rpmtype != typeStringArray || flags.rpmtype != typeInt32 {
-		return nil, fmt.Errorf("name, version, flags entries are not of expected types %d %d %d", names.rpmtype, versions.rpmtype, flags.rpmtype)
+	if (names == nil || versions == nil || flags == nil) {
+		return nil, fmt.Errorf("one of names versions or flags is nil %v %v %v", names, versions, flags)
 	}
 
-	actualNames, _ := names.toStringArray()
-	actualVersions, _ := versions.toStringArray()
-	actualFlags, _ := flags.toInt32Array()
+	if len(names) != len(versions) || len(names) != len(flags) {
+		return nil, fmt.Errorf("missmatch in counts %d %d %d", len(names), len(versions), len(flags))
+	}
 
-	out := make(Relations, len(actualNames))
-	for i := range actualNames {
-		sense, err := SenseFromFlag(actualFlags[i])
+
+	out := make(Relations, len(names))
+	for i := range names {
+		sense, err := SenseFromFlag(flags[i])
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse sense at %d: %w", i, err)
 		}
 		out[i] = &Relation{
-			Name: actualNames[i],
-			Version: actualVersions[i],
+			Name: names[i],
+			Version: versions[i],
 			Sense: sense,
 		}
 	}
 
 	return out, nil
-
 }
 
 func (e IndexEntry) toTime() (time.Time, error) {
@@ -180,7 +182,41 @@ func (e IndexEntry) toInt32Array() ([]int32, error) {
 	return out, nil
 }
 
+func (e IndexEntry) toUint32Array() ([]uint32, error) {
+	if e.rpmtype != typeInt32 {
+		return nil, fmt.Errorf("rpmtype %d is not an int type", e.rpmtype)
+	}
+	out := make([]uint32, e.count)
+	b := &bytes.Buffer{}
+	b.Write(e.data)
+	binary.Read(b, binary.BigEndian, &out)
 
+	return out, nil
+}
+
+func (e IndexEntry) toUint16Array() ([]uint16, error) {
+	if e.rpmtype != typeInt16 {
+		return nil, fmt.Errorf("rpmtype %d is not an int type", e.rpmtype)
+	}
+	out := make([]uint16, e.count)
+	b := &bytes.Buffer{}
+	b.Write(e.data)
+	binary.Read(b, binary.BigEndian, &out)
+
+	return out, nil
+}
+
+func (e IndexEntry) toInt16Array() ([]int16, error) {
+	if e.rpmtype != typeInt16 {
+		return nil, fmt.Errorf("rpmtype %d is not an int type", e.rpmtype)
+	}
+	out := make([]int16, e.count)
+	b := &bytes.Buffer{}
+	b.Write(e.data)
+	binary.Read(b, binary.BigEndian, &out)
+
+	return out, nil
+}
 func (e *IndexEntry) setData(data []byte) {
 	e.data = data
 }
@@ -468,6 +504,7 @@ type Lead struct {
 	typeFile uint16
 	archNum uint16
 	name string
+	nameFromBinary bool
 	osnum, signatureType uint16
 	reserved [16]uint8;
 } ;
@@ -511,6 +548,9 @@ func (r *Lead) toArray(fullVersion string) ([]byte, error) {
 	buf.Write([]byte{r.major, r.minor})
 	binary.Write(buf, binary.BigEndian, r.typeFile)
 	binary.Write(buf, binary.BigEndian, r.archNum)
+	if r.nameFromBinary {
+		fullVersion = ""
+	}
 	buf.Write(computeName(r.name, fullVersion))
 	binary.Write(buf, binary.BigEndian, r.osnum)
 	binary.Write(buf, binary.BigEndian, r.signatureType)
@@ -563,64 +603,6 @@ func readString(inp io.Reader, length int64) (string, error) {
 	}
 }
 
-func ReadLead(inp io.Reader) (*Lead, error) {
-	out := &Lead{}
-
-	if val, err := readExactly(inp, 4); err != nil {
-		return nil, fmt.Errorf("failed to read magic: %v", err)
-	} else {
-		out.magic = ([4]byte)(val)
-	}
-
-	if string(out.magic[:]) != "\xed\xab\xee\xdb" {
-		return nil, fmt.Errorf("not a valid RPM file")
-	}
-
-	version, err := io.ReadAll(io.LimitReader(inp, 2))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read version: %v", err)
-	}
-	out.major = uint8(version[0])
-	out.minor = uint8(version[1])
-	if out.major == 0 && out.minor == 0 {
-		return nil, fmt.Errorf("unsupported rpm version %d.%d", out.major, out.minor)
-	}
-
-	if out.typeFile, err = readUint16(inp); err != nil {
-		return nil, fmt.Errorf("failed to read typeFile: %v", err)
-	}
-
-	if out.archNum, err = readUint16(inp); err != nil {
-		return nil, fmt.Errorf("failed to read archNum: %v", err)
-	}
-
-	if out.name, err = readString(inp, 66); err != nil {
-		return nil, fmt.Errorf("failed to read name: %v", err)
-	}
-
-	if out.osnum, err = readUint16(inp); err != nil {
-		return nil, fmt.Errorf("failed to read osnum: %v", err)
-	}
-
-	if out.signatureType, err = readUint16(inp); err != nil {
-		return nil, fmt.Errorf("failed to read signatureType: %v", err)
-	}
-
-	var reserved []byte
-	if reserved, err = readExactly(inp, 16); err != nil {
-		return nil, fmt.Errorf("failed to read reserved: %v", err)
-	}
-	out.reserved = ([16]byte)(reserved)
-
-	for _, b := range out.reserved {
-		if b != 0 {
-			return nil, fmt.Errorf("reserved bytes not zero")
-		}
-	}
-
-	return out, nil
-}
-
 func (r *Lead) Equals(o *Lead) bool {
 	return r.magic == o.magic &&
 		r.major == o.major &&
@@ -630,4 +612,15 @@ func (r *Lead) Equals(o *Lead) bool {
 		r.name == o.name &&
 		r.osnum == o.osnum &&
 		r.signatureType == o.signatureType
+}
+
+func popTag[A any](m map[int]IndexEntry, key int, chain func(IndexEntry) (A, error)) (A, error) {
+	v, ok := m[key]
+	if !ok {
+		var defaultValue A
+		return defaultValue, fmt.Errorf("key %d not found", key)
+	}
+
+	delete(m, key)
+	return chain(v)
 }

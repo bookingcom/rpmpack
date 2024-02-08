@@ -23,7 +23,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path"
 	"sort"
 	"strconv"
@@ -59,7 +58,8 @@ type RPMMetaData struct {
 	Group,
 	Licence,
 	BuildHost,
-	Compressor string
+	Compressor,
+	SourcePackage string
 	Epoch     uint32
 	BuildTime time.Time
 	// Prefixes is used for relocatable packages, usually with a one item
@@ -148,6 +148,8 @@ func NewRPM(m RPMMetaData) (*RPM, error) {
 		Version: rpm.FullVersion(),
 		Sense:   SenseEqual,
 	})
+
+	m.SourcePackage = fmt.Sprintf("%s-%s.src.rpm", rpm.Name, rpm.FullVersion())
 
 	return rpm, nil
 }
@@ -396,12 +398,16 @@ func (r *RPM) SetSignature(tag int, e IndexEntry) {
 	r.signatures.Add(tag, e)
 }
 
+const BIN_SH = "/bin/sh"
+
 func (r *RPM) writeGenIndexes(h *index) {
 	h.Add(tagHeaderI18NTable, EntryString("C"))
 	h.Add(tagSize, EntryInt32([]int32{int32(r.payloadSize)}))
 	h.Add(tagName, EntryString(r.Name))
 	h.Add(tagVersion, EntryString(r.Version))
-	h.Add(tagEpoch, EntryUint32([]uint32{r.Epoch}))
+	if r.Epoch > 0 {
+		h.Add(tagEpoch, EntryUint32([]uint32{r.Epoch}))
+	}
 	h.Add(tagSummary, EntryString(r.Summary))
 	h.Add(tagDescription, EntryString(r.Description))
 	h.Add(tagBuildHost, EntryString(r.BuildHost))
@@ -429,30 +435,31 @@ func (r *RPM) writeGenIndexes(h *index) {
 
 	// rpm utilities look for the sourcerpm tag to deduce if this is not a source rpm (if it has a sourcerpm,
 	// it is NOT a source rpm).
-	h.Add(tagSourceRPM, EntryString(fmt.Sprintf("%s-%s.src.rpm", r.Name, r.FullVersion())))
+	h.Add(tagSourceRPM, EntryString(r.SourcePackage))
+
 	if r.pretrans != "" {
 		h.Add(tagPretrans, EntryString(r.pretrans))
-		h.Add(tagPretransProg, EntryString("/bin/sh"))
+		h.Add(tagPretransProg, EntryString(BIN_SH))
 	}
 	if r.prein != "" {
 		h.Add(tagPrein, EntryString(r.prein))
-		h.Add(tagPreinProg, EntryString("/bin/sh"))
+		h.Add(tagPreinProg, EntryString(BIN_SH))
 	}
 	if r.postin != "" {
 		h.Add(tagPostin, EntryString(r.postin))
-		h.Add(tagPostinProg, EntryString("/bin/sh"))
+		h.Add(tagPostinProg, EntryString(BIN_SH))
 	}
 	if r.preun != "" {
 		h.Add(tagPreun, EntryString(r.preun))
-		h.Add(tagPreunProg, EntryString("/bin/sh"))
+		h.Add(tagPreunProg, EntryString(BIN_SH))
 	}
 	if r.postun != "" {
 		h.Add(tagPostun, EntryString(r.postun))
-		h.Add(tagPostunProg, EntryString("/bin/sh"))
+		h.Add(tagPostunProg, EntryString(BIN_SH))
 	}
 	if r.posttrans != "" {
 		h.Add(tagPosttrans, EntryString(r.posttrans))
-		h.Add(tagPosttransProg, EntryString("/bin/sh"))
+		h.Add(tagPosttransProg, EntryString(BIN_SH))
 	}
 
 	if r.RPMMetaData.Changelog != nil {
@@ -579,6 +586,7 @@ func (r *RPM) writePayload(f RPMFile, links int) error {
 		Mode:  cpio.FileMode(f.Mode),
 		Size:  int64(len(f.Body)),
 		Links: links,
+		ModTime: time.Unix(int64(f.MTime), 0),
 	}
 	if err := r.cpio.WriteHeader(hdr); err != nil {
 		return fmt.Errorf("failed to write payload file header: %w", err)
@@ -588,116 +596,4 @@ func (r *RPM) writePayload(f RPMFile, links int) error {
 	}
 	r.payloadSize += uint(len(f.Body))
 	return nil
-}
-
-
-func ReadRPMFile(p string) (*RPM, error) {
-	file, err := os.Open(p)
-
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	lead, err := ReadLead(file)
-	if err != nil {
-		return nil, err
-	}
-
-	out := &RPM{}
-	out.lead = lead
-
-	signatures, err := ReadHeader(file, signatures)
-	if err != nil {
-		return nil, err
-	}
-
-	if signatures == nil {
-		return nil, fmt.Errorf("signatures header is nil")
-	}
-
-	out.signatures = signatures
-
-	offset, err := file.Seek(0, 1) // advance 0 from current position
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to get offset from begging of file: %w", err)
-	}
-
-	if offset % 8 > 0 {
-		newOffset, err := file.Seek(offset % 8, 1) // advance padding from current position
-		if err != nil {
-			return nil, fmt.Errorf("failed to advance file by %d bytes: %w", offset % 8, err)
-		}
-		targetOffset := int64(offset / 8) * 8 + 8
-		if newOffset != targetOffset {
-			return nil, fmt.Errorf("new offset is not matching %d expected %d", newOffset, targetOffset)
-		}
-	}
-
-	headers, err := ReadHeader(file, immutable)
-	if err != nil {
-		return nil, err
-	}
-
-	if headers == nil {
-		return nil, fmt.Errorf("immutable headers is nil")
-	}
-	out.headers = headers
-
-	out.payload = bytes.NewBuffer(nil)
-	count, err := out.payload.ReadFrom(file)
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to read payload: %w", err)
-	}
-
-	if count == 0 {
-		return nil, fmt.Errorf("read 0 bytes as payload")
-	}
-
-	out.cpio = cpio.NewWriter(out.payload)
-
-	buff := &bytes.Buffer{}
-
-	out.Name, _ = out.headers.entries[tagName].toString()
-	out.Summary, _ = out.headers.entries[tagSummary].toString()
-	out.Description, _ = out.headers.entries[tagDescription].toString()
-	out.Version, _ = out.headers.entries[tagVersion].toString()
-	out.Release, _ = out.headers.entries[tagRelease].toString()
-	out.Arch, _ = out.headers.entries[tagArch].toString()
-	out.OS, _ = out.headers.entries[tagOS].toString()
-	out.Vendor, _ = out.headers.entries[tagVendor].toString()
-	out.URL, _ = out.headers.entries[tagURL].toString()
-	out.Packager, _ = out.headers.entries[tagPackager].toString()
-	out.Group, _ = out.headers.entries[tagGroup].toString()
-	out.Licence, _ = out.headers.entries[tagLicence].toString()
-	out.BuildHost, _ = out.headers.entries[tagBuildHost].toString()
-	out.Compressor, _ = out.headers.entries[tagPayloadCompressor].toString()
-	out.Epoch, _ = out.headers.entries[tagEpoch].toUint32()
-	out.BuildTime, _ = out.headers.entries[tagBuildTime].toTime()
-	out.Prefixes, _ = out.headers.entries[tagPrefixes].toStringArray()
-
-	out.Provides, _ = out.headers.toRelations(tagProvides, tagProvideVersion, tagProvideFlags)
-	out.Obsoletes, _ = out.headers.toRelations(tagObsoletes, tagObsoleteVersion, tagObsoleteFlags)
-	out.Suggests, _ = out.headers.toRelations(tagSuggests, tagSuggestVersion, tagSuggestFlags)
-	out.Recommends, _ = out.headers.toRelations(tagRecommends, tagRecommendVersion, tagRecommendFlags)
-	out.Requires, _ = out.headers.toRelations(tagRequires, tagRequireVersion, tagRequireFlags)
-	out.Conflicts, _ = out.headers.toRelations(tagConflicts, tagConflictVersion, tagConflictFlags)
-	// out.Changelog, _ = out.headers.entries[tagChangelog].toChangelog()
-
-	z, compressorName, err := setupCompressor(out.Compressor, buff)
-	if err != nil {
-		return nil, err
-	}
-
-	if compressorName != out.Compressor {
-		return nil, fmt.Errorf("detected compressor %s does not match header %s", compressorName, out.Compressor)
-	}
-
-	//z.Write(out.cpio.)
-	out.compressedPayload = z
-
-
-	return out, nil
 }

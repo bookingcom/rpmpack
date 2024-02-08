@@ -1,8 +1,7 @@
 package rpmpack
 
 import (
-	"cmp"
-	"slices"
+	"fmt"
 )
 
 type ChangelogEntry struct {
@@ -32,16 +31,6 @@ func (c *Changelog) AddToIndex(h *index) error {
 		items[i] = *(*c)[i]
 	}
 
-	slices.SortFunc(items, func(a, b ChangelogEntry) int {
-		if a.Time != b.Time {
-			if a.Name != b.Name {
-				return cmp.Compare(a.Text, b.Text)
-			}
-			return cmp.Compare(a.Name, b.Name)
-		}
-		return cmp.Compare(b.Time, a.Time)
-	})
-
 	for idx, entry := range items {
 		times[idx] = uint32(entry.Time)
 		names[idx] = entry.Name
@@ -53,4 +42,45 @@ func (c *Changelog) AddToIndex(h *index) error {
 	h.Add(tagChangelogText, EntryStringSlice(texts))
 
 	return nil
+}
+
+func (i *index) toChangelog() (Changelog, error) {
+	times, err := popTag(i.entries, tagChangelogTime, IndexEntry.toInt32Array)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find tagChangelogTime: %w", err)
+	}
+
+	names, err := popTag(i.entries, tagChangelogName, IndexEntry.toStringArray)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find tagChangelogName: %w", err)
+	}
+
+	texts, err := popTag(i.entries, tagChangelogText, IndexEntry.toStringArray)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find tagChangelogText: %w", err)
+	}
+
+	if (names == nil && texts == nil && times == nil) {
+		return nil, nil
+	}
+
+	if (names == nil || texts == nil || times == nil) {
+		return nil, fmt.Errorf("one of names text or times is nil %v %v %v", names, texts, times)
+	}
+
+	if len(names) != len(texts) || len(names) != len(times) {
+		return nil, fmt.Errorf("missmatch in counts %d %d %d", len(names), len(texts), len(times))
+	}
+
+	out := make(Changelog, len(times))
+
+	for i := range times {
+		out[i] = &ChangelogEntry{
+			Time: uint32(times[i]),
+			Name: names[i],
+			Text: texts[i],
+		}
+	}
+
+	return out, nil
 }

@@ -18,6 +18,27 @@ const (
 	SenseLess          = 1 << iota
 	SenseGreater
 	SenseEqual
+	unused1
+	PostTrans
+	PreReq
+	PreTrans
+	Interp
+	ScriptPre
+	ScriptPost
+	ScriptPreun
+	ScriptPostun
+	ScriptVerify
+	FindRequires
+	FindProvides
+
+	TriggerIn
+	TriggerUn
+	TriggerPostun
+	MissingOk
+	unused2
+	unused3
+	unused4
+
 	SenseRPMLIB rpmSense = 1 << 24
 )
 
@@ -31,19 +52,7 @@ type Relation struct {
 }
 
 func SenseFromFlag(flag int32) (rpmSense, error) {
-	switch flag {
-	case int32(SenseAny):
-		return SenseAny, nil
-	case int32(SenseLess):
-		return SenseLess, nil
-	case int32(SenseGreater):
-		return SenseGreater, nil
-	case int32(SenseEqual):
-		return SenseEqual, nil
-	case int32(SenseRPMLIB):
-		return SenseRPMLIB, nil
-	}
-	return SenseAny, fmt.Errorf("invalid rpm sense flag: %d", flag)
+	return rpmSense(flag), nil
 }
 
 // String return the string representation of the Relation

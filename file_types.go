@@ -31,8 +31,10 @@ const (
 	LicenceFile
 	// ReadmeFile contains high level notes about the package.
 	ReadmeFile
-	// ExcludeFile is not a part of the package, and should not be installed.
-	ExcludeFile
+	NonUsed0
+	NonUsed1
+	PubKey
+	Artifact
 )
 
 // RPMFile contains a particular file's entry and data.

@@ -19,6 +19,7 @@ go_library(
         "file_types.go",
         "header.go",
         "rpm.go",
+        "rpm_read.go",
         "sense.go",
         "tags.go",
         "tar.go",
