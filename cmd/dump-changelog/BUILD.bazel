@@ -1,0 +1,15 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "dump-changelog_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/google/rpmpack/cmd/dump-changelog",
+    visibility = ["//visibility:private"],
+    deps = ["//:rpmpack"],
+)
+
+go_binary(
+    name = "dump-changelog",
+    embed = [":dump-changelog_lib"],
+    visibility = ["//visibility:public"],
+)
