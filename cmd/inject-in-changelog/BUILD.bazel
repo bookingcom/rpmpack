@@ -1,0 +1,31 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "inject-in-changelog_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/google/rpmpack/cmd/inject-in-changelog",
+    visibility = ["//visibility:private"],
+    deps = ["//:rpmpack"],
+)
+
+go_binary(
+    name = "inject-in-changelog",
+    embed = [":inject-in-changelog_lib"],
+    visibility = ["//visibility:public"],
+)
+
+sh_test(
+    name = "inject-in-changelog-test",
+    size = "small",
+    srcs = ["test-inject.sh"],
+    data = [
+        ":inject-in-changelog",
+        "//cmd/dump-changelog",
+        "@some-centos9-rpm//file",
+    ],
+    env = {
+        "GO_BINARY": "$(location :inject-in-changelog)",
+        "DUMP_CHANGELOG": "$(location //cmd/dump-changelog)",
+        "RPM_PATH": "$(location @some-centos9-rpm//file)",
+    },
+)

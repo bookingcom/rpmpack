@@ -103,9 +103,9 @@ go_test(
 go_test(
     name = "rpm_read_test",
     srcs = ["rpm_read_test.go"],
-    embed = [":rpmpack"],
     data = [
         "@some-centos9-rpm//file",
     ],
+    embed = [":rpmpack"],
     deps = ["@rules_go//go/runfiles:go_default_library"],
 )

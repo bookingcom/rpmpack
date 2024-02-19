@@ -16,6 +16,10 @@ func (c *ChangelogEntry) Equal(o *ChangelogEntry) bool {
 
 type Changelog []*ChangelogEntry
 
+func (r *RPM) GetChangelog() Changelog {
+	return r.Changelog
+}
+
 func (c *Changelog) AddToIndex(h *index) error {
 	num := len(*c)
 	if num == 0 {
