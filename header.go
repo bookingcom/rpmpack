@@ -349,6 +349,10 @@ func (i *index) Bytes() ([]byte, error) {
 	return w.Bytes(), nil
 }
 
+func (i *index) CountHeaders() int {
+	return len(i.entries)
+}
+
 // the eigenHeader is a weird entry. Its index entry is sorted first, but its content
 // is last. The content is a 16 byte index entry, which is almost the same as the index
 // entry except for the offset. The offset here is ... minus the length of the index entry region.

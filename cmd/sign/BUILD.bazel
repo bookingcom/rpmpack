@@ -1,0 +1,31 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+
+go_library(
+    name = "sign_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/google/rpmpack/cmd/sign",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//:rpmpack",
+        "@com_github_protonmail_gopenpgp_v2//crypto",
+    ],
+)
+
+go_binary(
+    name = "sign",
+    embed = [":sign_lib"],
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "sign_test",
+    srcs = ["sign_test.go"],
+    embed = [":sign_lib"],
+    deps = [
+        "@com_github_protonmail_gopenpgp_v2//helper",
+        "@rules_go//go/runfiles:go_default_library",
+    ],
+    data = [
+        "@some-centos9-rpm//file"
+    ]
+)

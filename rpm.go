@@ -398,6 +398,10 @@ func (r *RPM) SetSignature(tag int, e IndexEntry) {
 	r.signatures.Add(tag, e)
 }
 
+func (r *RPM) GetSignatures() *index {
+	return r.signatures
+}
+
 const BIN_SH = "/bin/sh"
 
 func (r *RPM) writeGenIndexes(h *index) {
